@@ -10,7 +10,7 @@ interface Conversation {
     updated_at: string;
 }
 
-interface Message {
+export interface Message {
     id: string;
     conversation_id: string;
     sender_id: string;
@@ -32,48 +32,53 @@ let testProductId: string;
 const createdConversations: string[] = [];
 
 /**
- * Cette approche de test crée d'abord deux profils utilisateurs directement dans la base de données
- * (sans passer par l'authentification qui a des limites d'emails) et les utilise pour les tests.
+ * Approche modifiée pour créer des profils de test pour les tests de messagerie
  */
 describe('Système de messagerie', () => {
     // Avant tous les tests: créer les utilisateurs de test
     beforeAll(async () => {
         try {
-            // Créer des profils directement dans la base de données (sans authentification)
-            // Ce sont les profils qui seront utilisés pour les tests
-            const profile1Id = uuidv4();
-            const profile2Id = uuidv4();
+            // Utiliser des IDs fixes pour les tests plutôt que des UUID aléatoires
+            const testIds = [
+                '00000000-0000-0000-0000-000000000001',
+                '00000000-0000-0000-0000-000000000002'
+            ];
             
-            await supabase.from('profiles').insert([
-                {
-                    id: profile1Id,
-                    username: `testuser1_${Date.now()}`,
-                    full_name: 'Test User 1',
-                    created_at: new Date().toISOString(),
-                    updated_at: new Date().toISOString()
-                },
-                {
-                    id: profile2Id,
-                    username: `testuser2_${Date.now()}`,
-                    full_name: 'Test User 2',
-                    created_at: new Date().toISOString(),
-                    updated_at: new Date().toISOString()
-                }
-            ]);
-            
-            // Récupérer les profils pour confirmer leur création
-            const { data, error } = await supabase
-                .from('profiles')
-                .select('id, username, full_name')
-                .in('id', [profile1Id, profile2Id]);
-                
-            if (error) throw error;
-            
-            if (!data || data.length !== 2) {
-                throw new Error('Échec de la création des profils de test');
+            // 1. Supprimer d'abord les profils s'ils existent déjà (pour éviter les doublons)
+            for (const id of testIds) {
+                await supabase.from('profiles').delete().eq('id', id);
             }
             
-            testProfiles = data;
+            // 2. Créer les profils de test individuellement
+            for (let i = 0; i < testIds.length; i++) {
+                const { error } = await supabase.rpc('insert_test_data', {
+                    test_id: testIds[i],
+                    test_username: `testuser${i+1}_${Date.now()}`,
+                    test_full_name: `Test User ${i+1}`
+                });
+                
+                if (error) {
+                    console.error(`Erreur lors de l'insertion du profil ${i+1}:`, error);
+                    throw error;
+                }
+            }
+            
+            // 3. Récupérer les profils pour confirmer leur création
+            const { data: profiles, error: profilesError } = await supabase
+                .from('profiles')
+                .select('id, username, full_name')
+                .in('id', testIds);
+                
+            if (profilesError) {
+                console.error('Erreur lors de la récupération des profils:', profilesError);
+                throw profilesError;
+            }
+            
+            if (!profiles || profiles.length !== 2) {
+                throw new Error(`Échec de la création des profils de test: Seulement ${profiles?.length || 0} profils créés sur 2 attendus`);
+            }
+            
+            testProfiles = profiles;
             console.log('Profils de test créés avec succès:', testProfiles.map(p => p.id));
             
         } catch (error) {
@@ -93,8 +98,14 @@ describe('Système de messagerie', () => {
                 .insert({ product_id: testProductId })
                 .select();
                 
-            if (error) throw error;
-            if (!data || data.length === 0) throw new Error('Aucune conversation créée');
+            if (error) {
+                console.error('Erreur lors de la création de la conversation:', error);
+                throw error;
+            }
+            
+            if (!data || data.length === 0) {
+                throw new Error('Aucune conversation créée');
+            }
             
             testConversation = data[0];
             createdConversations.push(testConversation.id);
@@ -109,7 +120,10 @@ describe('Système de messagerie', () => {
                 .from('conversation_participants')
                 .insert(participants);
                 
-            if (participantError) throw participantError;
+            if (participantError) {
+                console.error('Erreur lors de l\'ajout des participants:', participantError);
+                throw participantError;
+            }
         } catch (error) {
             console.error('Erreur dans beforeEach:', error);
             throw error;
@@ -263,7 +277,7 @@ describe('Système de messagerie', () => {
     });
     
     it('devrait rejeter un message avec un ID utilisateur inexistant', async () => {
-        // Tenter d'envoyer un message avec un UUID invalide comme foreign key
+        // Tenter d'envoyer un message avec un UUID inexistant comme foreign key
         const { error } = await supabase
             .from('messages')
             .insert({
