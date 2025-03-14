@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Heart, MessageCircle } from 'lucide-react';
+import { Heart, MessageCircle, User } from 'lucide-react';
 import { MessageModal } from './MessageModal';
+import SearchUserModal from './SearchUserModal';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 
@@ -20,18 +21,33 @@ interface ProductCardProps {
 
 const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
 
   const handleMessageClick = async () => {
     const { data: { user } } = await supabase.auth.getUser();
+    
     if (!user) {
       toast.error("Veuillez vous connecter pour envoyer un message");
       return;
     }
+    
     if (user.id === product.seller_id) {
       toast.error("Vous ne pouvez pas vous envoyer un message");
       return;
     }
+    
     setIsMessageModalOpen(true);
+  };
+
+  const handleShareClick = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    if (!user) {
+      toast.error("Veuillez vous connecter pour partager cette annonce");
+      return;
+    }
+    
+    setIsSearchModalOpen(true);
   };
 
   return (
@@ -57,10 +73,17 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
             <div className="flex gap-2">
               <button
                 onClick={handleMessageClick}
-                className="bg-gray-100 text-gray-800 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2"
+                className="bg-gray-100 text-gray-800 px-3 py-2 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-1"
               >
-                <MessageCircle className="h-5 w-5" />
+                <MessageCircle className="h-4 w-4" />
                 Message
+              </button>
+              <button
+                onClick={handleShareClick}
+                className="bg-gray-100 text-gray-800 px-3 py-2 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-1"
+              >
+                <User className="h-4 w-4" />
+                Partager
               </button>
               <button className="bg-black text-white px-4 py-2 rounded-lg hover:bg-gray-800 transition-colors">
                 Voir détails
@@ -75,6 +98,12 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
         onClose={() => setIsMessageModalOpen(false)}
         productId={product.id.toString()}
         sellerId={product.seller_id}
+      />
+
+      <SearchUserModal 
+        isOpen={isSearchModalOpen}
+        onClose={() => setIsSearchModalOpen(false)}
+        productId={product.id.toString()}
       />
     </>
   );

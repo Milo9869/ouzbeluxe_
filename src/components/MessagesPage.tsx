@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { User } from '@supabase/supabase-js';
 import Navbar from './Navbar';
 import ConversationList from './ConversationList';
-import { Send, ArrowLeft, MessageCircle } from 'lucide-react';
+import SearchUser from './SearchUser';
+import { Send, ArrowLeft, MessageCircle, Search, PlusCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { 
   getConversationMessages, 
@@ -31,6 +32,7 @@ const MessagesPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [isMobileListVisible, setIsMobileListVisible] = useState(true);
+  const [isSearchVisible, setIsSearchVisible] = useState(false);
 
   // Vérifier si l'utilisateur est connecté
   useEffect(() => {
@@ -147,6 +149,11 @@ const MessagesPage: React.FC = () => {
     return groups;
   }, {});
 
+  // Basculer entre la liste et la recherche
+  const toggleSearch = () => {
+    setIsSearchVisible(!isSearchVisible);
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <Navbar />
@@ -157,10 +164,24 @@ const MessagesPage: React.FC = () => {
           className={`bg-white w-full md:w-80 border-r overflow-y-auto flex-shrink-0 
                       ${isMobileListVisible ? 'block' : 'hidden md:block'}`}
         >
-          <div className="p-4 border-b">
+          <div className="p-4 border-b flex justify-between items-center">
             <h2 className="text-xl font-serif font-bold">Mes messages</h2>
+            <button 
+              onClick={toggleSearch}
+              className="p-2 text-gray-600 hover:text-gray-900 rounded-full hover:bg-gray-100"
+              title="Nouvelle conversation"
+            >
+              <PlusCircle className="h-5 w-5" />
+            </button>
           </div>
-          <ConversationList onSelectConversation={setSelectedConversation} />
+          
+          {isSearchVisible ? (
+            <div className="p-4">
+              <SearchUser onClose={toggleSearch} />
+            </div>
+          ) : (
+            <ConversationList onSelectConversation={setSelectedConversation} />
+          )}
         </div>
         
         {/* Zone de conversation (desktop et mobile) */}
@@ -259,6 +280,13 @@ const MessagesPage: React.FC = () => {
                 <MessageCircle className="mx-auto h-12 w-12 text-gray-400 mb-3" />
                 <h3 className="text-lg font-medium text-gray-900 mb-1">Vos messages</h3>
                 <p>Sélectionnez une conversation pour commencer à discuter</p>
+                <button
+                  onClick={toggleSearch}
+                  className="mt-4 flex items-center gap-2 mx-auto bg-black text-white px-4 py-2 rounded-lg hover:bg-gray-800 transition-colors"
+                >
+                  <Search className="h-4 w-4" />
+                  Nouvelle conversation
+                </button>
               </div>
             </div>
           )}

@@ -71,30 +71,39 @@ export async function createConversation(productId: string, participants: string
 export async function findOrCreateConversation(productId: string, userId: string, otherUserId: string) {
   try {
     // 1. Rechercher les conversations existantes de l'utilisateur pour ce produit
-    const { data: existingConversations, error: convError } = await supabase
-      .from('conversations')
+    const { data: userConversations, error: convError } = await supabase
+      .from('conversation_participants')
       .select(`
-        id,
-        product_id,
-        conversation_participants!inner(user_id)
+        conversation_id,
+        conversations:conversations!inner(
+          id,
+          product_id
+        )
       `)
-      .eq('product_id', productId)
-      .eq('conversation_participants.user_id', userId);
+      .eq('user_id', userId);
 
     if (convError) throw convError;
 
-    // 2. Vérifier si l'autre utilisateur fait partie d'une de ces conversations
-    if (existingConversations && existingConversations.length > 0) {
-      for (const conv of existingConversations) {
+    // 2. Pour chaque conversation, vérifier si l'autre utilisateur est participant
+    if (userConversations && userConversations.length > 0) {
+      for (const conv of userConversations) {
+        const conversation = conv.conversations as unknown as Conversation;
+        
+        // Vérifier si c'est pour le même produit
+        if (conversation.product_id !== productId) {
+          continue;
+        }
+        
+        // Vérifier si l'autre utilisateur fait partie de cette conversation
         const { data: participants, error: partError } = await supabase
           .from('conversation_participants')
           .select('user_id')
-          .eq('conversation_id', conv.id)
+          .eq('conversation_id', conv.conversation_id)
           .eq('user_id', otherUserId);
 
         if (!partError && participants && participants.length > 0) {
           // Conversation trouvée
-          return { data: { id: conv.id, product_id: conv.product_id }, error: null };
+          return { data: conversation, error: null };
         }
       }
     }
@@ -175,6 +184,23 @@ export async function markAllMessagesAsRead(conversationId: string, userId: stri
     return { data, error };
   } catch (error) {
     console.error('Error marking all messages as read:', error);
+    return { data: null, error };
+  }
+}
+
+// Rechercher des utilisateurs
+export async function searchUsers(query: string, currentUserId: string) {
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, email, full_name, avatar_url')
+      .or(`email.ilike.%${query}%,full_name.ilike.%${query}%`)
+      .neq('id', currentUserId)
+      .limit(20);
+
+    return { data, error };
+  } catch (error) {
+    console.error('Error searching users:', error);
     return { data: null, error };
   }
 }
@@ -271,5 +297,91 @@ export async function getUserConversations(userId: string): Promise<{ data: Conv
   } catch (error) {
     console.error('Error getting user conversations:', error);
     return { data: null, error: error instanceof Error ? { message: error.message, code: '', details: '', hint: '' } as PostgrestError : null };
+  }
+}
+
+// Supprimer une conversation
+export async function deleteConversation(conversationId: string) {
+  try {
+    // Supprimer d'abord tous les messages de la conversation
+    const { error: messagesError } = await supabase
+      .from('messages')
+      .delete()
+      .eq('conversation_id', conversationId);
+      
+    if (messagesError) throw messagesError;
+    
+    // Supprimer ensuite les participants
+    const { error: participantsError } = await supabase
+      .from('conversation_participants')
+      .delete()
+      .eq('conversation_id', conversationId);
+      
+    if (participantsError) throw participantsError;
+    
+    // Enfin, supprimer la conversation elle-même
+    const { data, error } = await supabase
+      .from('conversations')
+      .delete()
+      .eq('id', conversationId)
+      .select();
+      
+    return { data, error };
+  } catch (error) {
+    console.error('Error deleting conversation:', error);
+    return { data: null, error };
+  }
+}
+
+// Vérifier si une conversation existe entre deux utilisateurs pour un produit
+export async function checkConversationExists(productId: string, userId: string, otherUserId: string) {
+  try {
+    // 1. Rechercher les conversations pour ce produit
+    const { data: conversations, error: convError } = await supabase
+      .from('conversations')
+      .select(`
+        id,
+        conversation_participants!inner(user_id)
+      `)
+      .eq('product_id', productId);
+      
+    if (convError) throw convError;
+    
+    if (!conversations || conversations.length === 0) {
+      return { exists: false, conversationId: null, error: null };
+    }
+    
+    // 2. Pour chaque conversation, vérifier si les deux utilisateurs sont participants
+    for (const conv of conversations) {
+      // Vérifier si l'utilisateur actuel est participant
+      const { data: currentUserParticipant, error: currError } = await supabase
+        .from('conversation_participants')
+        .select('user_id')
+        .eq('conversation_id', conv.id)
+        .eq('user_id', userId)
+        .single();
+        
+      if (currError) continue;
+      
+      // Vérifier si l'autre utilisateur est participant
+      const { data: otherUserParticipant, error: otherError } = await supabase
+        .from('conversation_participants')
+        .select('user_id')
+        .eq('conversation_id', conv.id)
+        .eq('user_id', otherUserId)
+        .single();
+        
+      if (otherError) continue;
+      
+      // Si les deux sont participants, la conversation existe
+      if (currentUserParticipant && otherUserParticipant) {
+        return { exists: true, conversationId: conv.id, error: null };
+      }
+    }
+    
+    return { exists: false, conversationId: null, error: null };
+  } catch (error) {
+    console.error('Error checking conversation:', error);
+    return { exists: false, conversationId: null, error };
   }
 }
