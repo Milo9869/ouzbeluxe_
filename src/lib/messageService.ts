@@ -41,6 +41,125 @@ export interface ConversationSummary {
 
 // Créer une nouvelle conversation
 export async function createConversation(productId: string, participants: string[]) {
+  console.log("createConversation appelé avec:", { productId, participants });
+  
+  try {
+    // 1. Créer la conversation
+    console.log("Création de la conversation...");
+    const { data: conversation, error: convError } = await supabase
+      .from('conversations')
+      .insert({ product_id: productId })
+      .select()
+      .single();
+
+    console.log("Résultat création conversation:", { conversation, convError });
+    
+    if (convError) {
+      console.error("Erreur création conversation:", convError);
+      throw convError;
+    }
+
+    // 2. Ajouter les participants
+    console.log("Ajout des participants...");
+    const participantPromises = participants.map(userId => {
+      console.log("Ajout participant:", userId, "à conversation:", conversation.id);
+      return supabase
+        .from('conversation_participants')
+        .insert({ conversation_id: conversation.id, user_id: userId });
+    });
+
+    const participantResults = await Promise.all(participantPromises);
+    console.log("Résultats ajout participants:", participantResults);
+    
+    // Vérifier les erreurs
+    const errors = participantResults.filter(result => result.error);
+    if (errors.length > 0) {
+      console.error("Erreurs ajout participants:", errors);
+      throw errors[0].error;
+    }
+
+    return { data: conversation, error: null };
+  } catch (error) {
+    console.error('Erreur complète createConversation:', error);
+    return { data: null, error };
+  }
+}
+
+// Trouver ou créer une conversation entre utilisateurs pour un produit
+export async function findOrCreateConversation(productId: string, userId: string, otherUserId: string) {
+  console.log("findOrCreateConversation appelé avec:", { productId, userId, otherUserId });
+  
+  try {
+    // 1. Rechercher si une conversation existe déjà (manuellement)
+    console.log("Recherche manuelle de conversation existante");
+    
+    // 1.1 D'abord, récupérer toutes les conversations pour ce produit
+    const { data: productConversations, error: prodError } = await supabase
+      .from('conversations')
+      .select('id')
+      .eq('product_id', productId);
+    
+    if (prodError) {
+      console.error("Erreur recherche conversations par produit:", prodError);
+      throw prodError;
+    }
+    
+    console.log("Conversations pour ce produit:", productConversations);
+    
+    // Si aucune conversation pour ce produit, en créer une nouvelle directement
+    if (!productConversations || productConversations.length === 0) {
+      return await createNewConversation(productId, userId, otherUserId);
+    }
+    
+    // 1.2 Pour chaque conversation, vérifier si les deux utilisateurs sont participants
+    for (const conv of productConversations) {
+      // Vérifier les participants pour cette conversation
+      const { data: participants, error: partError } = await supabase
+        .from('conversation_participants')
+        .select('user_id')
+        .eq('conversation_id', conv.id);
+      
+      if (partError) {
+        console.error("Erreur recherche participants:", partError);
+        continue; // Essayer la conversation suivante
+      }
+      
+      // Extraire les IDs des participants
+      const participantIds = participants.map(p => p.user_id);
+      
+      // Vérifier si les deux utilisateurs sont dans cette conversation
+      if (participantIds.includes(userId) && participantIds.includes(otherUserId)) {
+        console.log("Conversation existante trouvée:", conv.id);
+        
+        // Récupérer les détails complets de la conversation
+        const { data: convDetails, error: detailsError } = await supabase
+          .from('conversations')
+          .select('*')
+          .eq('id', conv.id)
+          .single();
+        
+        if (detailsError) {
+          console.error("Erreur récupération détails conversation:", detailsError);
+          throw detailsError;
+        }
+        
+        return { data: convDetails, error: null };
+      }
+    }
+    
+    // 2. Si aucune conversation existante, en créer une nouvelle
+    return await createNewConversation(productId, userId, otherUserId);
+    
+  } catch (error) {
+    console.error('Erreur complète findOrCreateConversation:', error);
+    return { data: null, error };
+  }
+}
+
+// Fonction auxiliaire pour créer une nouvelle conversation
+async function createNewConversation(productId: string, userId: string, otherUserId: string) {
+  console.log("Création d'une nouvelle conversation");
+  
   try {
     // 1. Créer la conversation
     const { data: conversation, error: convError } = await supabase
@@ -48,76 +167,44 @@ export async function createConversation(productId: string, participants: string
       .insert({ product_id: productId })
       .select()
       .single();
-
-    if (convError) throw convError;
-
+    
+    console.log("Résultat création conversation:", { conversation, convError });
+    
+    if (convError) {
+      console.error("Erreur création conversation:", convError);
+      throw convError;
+    }
+    
     // 2. Ajouter les participants
-    const participantPromises = participants.map(userId =>
+    const promises = [
       supabase
         .from('conversation_participants')
-        .insert({ conversation_id: conversation.id, user_id: userId })
-    );
-
-    await Promise.all(participantPromises);
-
+        .insert({ conversation_id: conversation.id, user_id: userId }),
+      supabase
+        .from('conversation_participants')
+        .insert({ conversation_id: conversation.id, user_id: otherUserId })
+    ];
+    
+    const results = await Promise.all(promises);
+    console.log("Résultats ajout participants:", results);
+    
+    // Vérifier les erreurs
+    const errors = results.filter(r => r.error).map(r => r.error);
+    if (errors.length > 0) {
+      console.error("Erreurs lors de l'ajout des participants:", errors);
+      throw errors[0];
+    }
+    
     return { data: conversation, error: null };
   } catch (error) {
-    console.error('Error creating conversation:', error);
-    return { data: null, error };
-  }
-}
-
-// Trouver ou créer une conversation entre utilisateurs pour un produit
-export async function findOrCreateConversation(productId: string, userId: string, otherUserId: string) {
-  try {
-    // 1. Rechercher les conversations existantes de l'utilisateur pour ce produit
-    const { data: userConversations, error: convError } = await supabase
-      .from('conversation_participants')
-      .select(`
-        conversation_id,
-        conversations:conversations!inner(
-          id,
-          product_id
-        )
-      `)
-      .eq('user_id', userId);
-
-    if (convError) throw convError;
-
-    // 2. Pour chaque conversation, vérifier si l'autre utilisateur est participant
-    if (userConversations && userConversations.length > 0) {
-      for (const conv of userConversations) {
-        const conversation = conv.conversations as unknown as Conversation;
-        
-        // Vérifier si c'est pour le même produit
-        if (conversation.product_id !== productId) {
-          continue;
-        }
-        
-        // Vérifier si l'autre utilisateur fait partie de cette conversation
-        const { data: participants, error: partError } = await supabase
-          .from('conversation_participants')
-          .select('user_id')
-          .eq('conversation_id', conv.conversation_id)
-          .eq('user_id', otherUserId);
-
-        if (!partError && participants && participants.length > 0) {
-          // Conversation trouvée
-          return { data: conversation, error: null };
-        }
-      }
-    }
-
-    // 3. Aucune conversation trouvée, en créer une nouvelle
-    return await createConversation(productId, [userId, otherUserId]);
-  } catch (error) {
-    console.error('Error finding or creating conversation:', error);
+    console.error("Erreur création nouvelle conversation:", error);
     return { data: null, error };
   }
 }
 
 // Envoyer un message
 export async function sendMessage(conversationId: string, senderId: string, content: string) {
+  console.log("sendMessage appelé:", { conversationId, senderId, content });
   try {
     const { data, error } = await supabase
       .from('messages')
@@ -130,6 +217,7 @@ export async function sendMessage(conversationId: string, senderId: string, cont
       .select()
       .single();
 
+    console.log("Résultat envoi message:", { data, error });
     return { data, error };
   } catch (error) {
     console.error('Error sending message:', error);
@@ -207,6 +295,7 @@ export async function searchUsers(query: string, currentUserId: string) {
 
 // Récupérer toutes les conversations d'un utilisateur avec résumé
 export async function getUserConversations(userId: string): Promise<{ data: ConversationSummary[] | null, error: PostgrestError | null }> {
+  console.log("getUserConversations appelé pour userId:", userId);
   try {
     // 1. Récupérer toutes les conversations de l'utilisateur
     const { data: userConversations, error: convError } = await supabase
@@ -222,6 +311,8 @@ export async function getUserConversations(userId: string): Promise<{ data: Conv
       `)
       .eq('user_id', userId);
 
+    console.log("Résultat étape 1 getUserConversations:", { userConversations, convError });
+    
     if (convError) throw convError;
     if (!userConversations || userConversations.length === 0) {
       return { data: [], error: null };
@@ -231,18 +322,29 @@ export async function getUserConversations(userId: string): Promise<{ data: Conv
     const conversationSummaries: ConversationSummary[] = [];
       
     for (const conv of userConversations) {
+      console.log("Traitement conversation:", conv.conversation_id);
+      
       // Trouver l'autre participant
       const { data: participants, error: partError } = await supabase
         .from('conversation_participants')
         .select('user_id')
         .eq('conversation_id', conv.conversation_id)
         .neq('user_id', userId);
-        
-      if (partError) continue;
       
-      if (!participants || participants.length === 0) continue;
+      console.log("Participants:", { participants, partError });
+        
+      if (partError) {
+        console.error("Erreur participants:", partError);
+        continue;
+      }
+      
+      if (!participants || participants.length === 0) {
+        console.log("Aucun autre participant trouvé");
+        continue;
+      }
       
       const otherUserId = participants[0].user_id;
+      console.log("Autre participant:", otherUserId);
       
       // Récupérer les informations de l'autre utilisateur
       const { data: otherUserInfo, error: userError } = await supabase
@@ -250,8 +352,13 @@ export async function getUserConversations(userId: string): Promise<{ data: Conv
         .select('id, email, full_name, avatar_url')
         .eq('id', otherUserId)
         .single();
+      
+      console.log("Infos autre utilisateur:", { otherUserInfo, userError });
         
-      if (userError) continue;
+      if (userError) {
+        console.error("Erreur infos utilisateur:", userError);
+        continue;
+      }
       
       // Récupérer le dernier message
       const { data: lastMessages, error: msgError } = await supabase
@@ -260,8 +367,13 @@ export async function getUserConversations(userId: string): Promise<{ data: Conv
         .eq('conversation_id', conv.conversation_id)
         .order('created_at', { ascending: false })
         .limit(1);
+      
+      console.log("Dernier message:", { lastMessages, msgError });
         
-      if (msgError) continue;
+      if (msgError) {
+        console.error("Erreur dernier message:", msgError);
+        continue;
+      }
       
       // Compter les messages non lus
       const { count, error: countError } = await supabase
@@ -270,8 +382,13 @@ export async function getUserConversations(userId: string): Promise<{ data: Conv
         .eq('conversation_id', conv.conversation_id)
         .eq('read', false)
         .neq('sender_id', userId);
+      
+      console.log("Messages non lus:", { count, countError });
         
-      if (countError) continue;
+      if (countError) {
+        console.error("Erreur comptage non lus:", countError);
+        continue;
+      }
       
       const conversation = conv.conversations as unknown as Conversation;
       
@@ -293,6 +410,7 @@ export async function getUserConversations(userId: string): Promise<{ data: Conv
       });
     }
 
+    console.log("Résumés de conversations créés:", conversationSummaries.length);
     return { data: conversationSummaries, error: null };
   } catch (error) {
     console.error('Error getting user conversations:', error);
