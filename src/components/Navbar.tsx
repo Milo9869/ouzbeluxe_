@@ -151,12 +151,6 @@ const Navbar = () => {
                 <User className="h-6 w-6" />
               </button>
               
-              <button 
-                onClick={() => navigate('/create-product')}
-                className="text-gray-600 hover:text-gray-900"
-              >
-                Vendre
-              </button>
               {isAuthenticated && (
                 <button 
                   onClick={handleLogout}

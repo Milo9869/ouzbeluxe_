@@ -5,6 +5,7 @@ import { X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 import { AuthError } from '@supabase/supabase-js';
+import { useNavigate } from 'react-router-dom';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -14,6 +15,7 @@ interface AuthModalProps {
 type AuthMode = 'login' | 'register' | 'forgotPassword';
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
+  const navigate = useNavigate();
   const [mode, setMode] = useState<AuthMode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -34,6 +36,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         if (error) throw error;
         toast.success('Connexion réussie');
         onClose();
+        navigate('/create-product');
       } else if (mode === 'register') {
         const { error } = await supabase.auth.signUp({
           email,
