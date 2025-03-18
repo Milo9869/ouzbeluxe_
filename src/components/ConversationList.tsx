@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { getUserConversations, ConversationSummary } from '../lib/messageService';
 import { supabase } from '../lib/supabase';
 import { MessageCircle } from 'lucide-react';
@@ -7,17 +7,33 @@ interface ConversationListProps {
   onSelectConversation: (conversation: ConversationSummary) => void;
 }
 
-const ConversationList: React.FC<ConversationListProps> = ({ onSelectConversation }) => {
+export const ConversationList: React.FC<ConversationListProps> = ({ onSelectConversation }) => {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   useEffect(() => {
     loadConversations();
+    setupRealtimeSubscription();
     
-    // Abonnement aux changements de messages
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+    };
+  }, []);
+
+  const setupRealtimeSubscription = () => {
+    // Nettoyer l'ancien canal si existant
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current);
+    }
+    
+    // Créer un canal pour surveiller les changements dans les tables messages et conversations
     const channel = supabase
-      .channel('public:messages')
+      .channel('conversation-list-changes')
       .on('postgres_changes', 
         { event: '*', schema: 'public', table: 'messages' }, 
         () => {
@@ -25,12 +41,21 @@ const ConversationList: React.FC<ConversationListProps> = ({ onSelectConversatio
           loadConversations();
         }
       )
-      .subscribe();
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'conversations' },
+        () => {
+          // Recharger quand une conversation est créée ou mise à jour
+          loadConversations();
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('Abonné avec succès aux changements de conversations');
+        }
+      });
       
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
+    channelRef.current = channel;
+  };
 
   const loadConversations = async () => {
     setLoading(true);
@@ -38,6 +63,7 @@ const ConversationList: React.FC<ConversationListProps> = ({ onSelectConversatio
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
+      console.log("Chargement des conversations pour l'utilisateur:", user.id);
       const { data, error } = await getUserConversations(user.id);
       if (error) throw error;
       
@@ -49,6 +75,7 @@ const ConversationList: React.FC<ConversationListProps> = ({ onSelectConversatio
           return dateB - dateA; // Ordre décroissant
         });
         
+        console.log(`${sortedConversations.length} conversations chargées et triées`);
         setConversations(sortedConversations);
       }
     } catch (error) {
@@ -130,5 +157,3 @@ const ConversationList: React.FC<ConversationListProps> = ({ onSelectConversatio
     </div>
   );
 };
-
-export default ConversationList;

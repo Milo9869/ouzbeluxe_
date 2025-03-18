@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { User } from '@supabase/supabase-js';
 import Navbar from './Navbar';
-import ConversationList from './ConversationList';
+import { ConversationList } from './ConversationList';
 import SearchUser from './SearchUser';
 import { Send, ArrowLeft, MessageCircle, Search, PlusCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -33,6 +33,7 @@ const MessagesPage: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [isMobileListVisible, setIsMobileListVisible] = useState(true);
   const [isSearchVisible, setIsSearchVisible] = useState(false);
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   // Vérifier si l'utilisateur est connecté
   useEffect(() => {
@@ -46,45 +47,72 @@ const MessagesPage: React.FC = () => {
     };
     
     checkUser();
+    
+    // Nettoyage des abonnements à la déconnexion
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+    };
   }, [navigate]);
 
   // Charger les messages de la conversation sélectionnée
   useEffect(() => {
-    if (selectedConversation) {
+    if (selectedConversation && currentUser) {
+      // Nettoyer l'abonnement précédent s'il existe
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+      
+      // Charger les messages
       loadMessages(selectedConversation.id);
       setIsMobileListVisible(false);
       
       // Marquer tous les messages comme lus
-      if (currentUser) {
-        markAllMessagesAsRead(selectedConversation.id, currentUser.id);
-      }
+      markAllMessagesAsRead(selectedConversation.id, currentUser.id);
+      
+      // Configurer un nouvel abonnement pour cette conversation
+      const channel = supabase
+        .channel(`messages:${selectedConversation.id}`)
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${selectedConversation.id}`,
+        }, (payload) => {
+          const newMessage = payload.new as Message;
+          
+          // Utiliser un callback fonctionnel pour s'assurer d'avoir l'état le plus récent
+          setMessages(currentMessages => {
+            // Vérifier si le message existe déjà pour éviter les doublons
+            if (!currentMessages.some(msg => msg.id === newMessage.id)) {
+              return [...currentMessages, newMessage];
+            }
+            return currentMessages;
+          });
+          
+          // Marquer le message comme lu s'il vient de l'autre personne
+          if (currentUser && newMessage.sender_id !== currentUser.id) {
+            markAllMessagesAsRead(selectedConversation.id, currentUser.id);
+          }
+        })
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            console.log(`Abonné avec succès au canal messages:${selectedConversation.id}`);
+          }
+        });
+      
+      // Stocker la référence du canal pour le nettoyage
+      channelRef.current = channel;
     }
-  }, [selectedConversation, currentUser]);
-
-  // S'abonner aux nouveaux messages
-  useEffect(() => {
-    if (!selectedConversation) return;
     
-    const channel = supabase
-      .channel(`messages:${selectedConversation.id}`)
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'messages',
-        filter: `conversation_id=eq.${selectedConversation.id}`,
-      }, (payload) => {
-        const newMessage = payload.new as Message;
-        setMessages(current => [...current, newMessage]);
-        
-        // Marquer le message comme lu s'il vient de l'autre personne
-        if (currentUser && newMessage.sender_id !== currentUser.id) {
-          markAllMessagesAsRead(selectedConversation.id, currentUser.id);
-        }
-      })
-      .subscribe();
-
     return () => {
-      supabase.removeChannel(channel);
+      if (channelRef.current && !selectedConversation) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
     };
   }, [selectedConversation, currentUser]);
 
@@ -96,8 +124,10 @@ const MessagesPage: React.FC = () => {
   const loadMessages = async (conversationId: string) => {
     try {
       setLoading(true);
+      console.log("Chargement des messages pour la conversation:", conversationId);
       const { data, error } = await getConversationMessages(conversationId);
       if (error) throw error;
+      console.log(`${data?.length || 0} messages chargés`);
       setMessages(data || []);
     } catch (error) {
       console.error('Error loading messages:', error);
@@ -113,14 +143,16 @@ const MessagesPage: React.FC = () => {
 
     try {
       setLoading(true);
+      const messageContent = newMessage.trim();
+      setNewMessage(''); // Vider l'input immédiatement
+      
       const { error } = await sendMessage(
         selectedConversation.id,
         currentUser.id,
-        newMessage.trim()
+        messageContent
       );
       
       if (error) throw error;
-      setNewMessage('');
     } catch (error) {
       console.error('Error sending message:', error);
       toast.error('Erreur lors de l\'envoi du message');

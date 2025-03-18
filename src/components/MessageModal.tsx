@@ -22,9 +22,9 @@ interface Message {
 
 interface User {
   id: string;
-  email?: string;
-  full_name?: string;
-  avatar_url?: string;
+  email?: string | null;
+  full_name?: string | null;
+  avatar_url?: string | null;
 }
 
 export const MessageModal: React.FC<MessageModalProps> = ({ isOpen, onClose, productId, sellerId }) => {
@@ -35,6 +35,7 @@ export const MessageModal: React.FC<MessageModalProps> = ({ isOpen, onClose, pro
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [sellerInfo, setSellerInfo] = useState<{ email: string; full_name?: string } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   
   // Charger l'utilisateur actuel
   useEffect(() => {
@@ -80,11 +81,24 @@ export const MessageModal: React.FC<MessageModalProps> = ({ isOpen, onClose, pro
     if (isOpen && currentUser) {
       initializeConversation();
     }
+    
+    // Nettoyage lorsque la modal se ferme
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+    };
   }, [isOpen, productId, sellerId, currentUser]);
 
-  // S'abonner aux nouveaux messages
+  // S'abonner aux nouveaux messages quand conversationId change
   useEffect(() => {
     if (!conversationId) return;
+    
+    // Nettoyer tout canal existant avant d'en créer un nouveau
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current);
+    }
     
     // Créer un canal Supabase pour les messages en temps réel
     const channel = supabase
@@ -96,17 +110,37 @@ export const MessageModal: React.FC<MessageModalProps> = ({ isOpen, onClose, pro
         filter: `conversation_id=eq.${conversationId}`,
       }, (payload) => {
         const newMessage = payload.new as Message;
-        setMessages(current => [...current, newMessage]);
+        // Utiliser un callback fonctionnel pour s'assurer que nous avons l'état le plus récent
+        setMessages(currentMessages => {
+          // Vérifier si le message existe déjà pour éviter les doublons
+          if (!currentMessages.some(msg => msg.id === newMessage.id)) {
+            return [...currentMessages, newMessage];
+          }
+          return currentMessages;
+        });
         
         // Marquer les messages de l'autre personne comme lus
         if (newMessage.sender_id !== currentUser?.id) {
           markMessageAsRead(newMessage.id);
         }
       })
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log(`Abonné avec succès au canal messages:${conversationId}`);
+        }
+      });
+
+    // Stocker la référence du canal pour le nettoyage
+    channelRef.current = channel;
+    
+    // Charger les messages existants
+    loadMessages(conversationId);
 
     return () => {
-      supabase.removeChannel(channel);
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
     };
   }, [conversationId, currentUser]);
 
@@ -165,26 +199,30 @@ export const MessageModal: React.FC<MessageModalProps> = ({ isOpen, onClose, pro
 
       if (foundConversationId) {
         // Utiliser la conversation existante
+        console.log("Conversation existante trouvée:", foundConversationId);
         setConversationId(foundConversationId);
-        await loadMessages(foundConversationId);
       } else {
         // Créer une nouvelle conversation
+        console.log("Création d'une nouvelle conversation");
         const { data: newConversation, error: createError } = await supabase
           .from('conversations')
           .insert({ product_id: productId })
-          .select()
-          .single();
+          .select();
 
         if (createError) throw createError;
+
+        if (!newConversation || newConversation.length === 0) {
+          throw new Error('Aucune conversation créée');
+        }
 
         // Ajouter les deux participants
         const participantsPromises = [
           supabase
             .from('conversation_participants')
-            .insert({ conversation_id: newConversation.id, user_id: currentUser.id }),
+            .insert({ conversation_id: newConversation[0].id, user_id: currentUser.id }),
           supabase
             .from('conversation_participants')
-            .insert({ conversation_id: newConversation.id, user_id: sellerId })
+            .insert({ conversation_id: newConversation[0].id, user_id: sellerId })
         ];
 
         const results = await Promise.all(participantsPromises);
@@ -194,7 +232,8 @@ export const MessageModal: React.FC<MessageModalProps> = ({ isOpen, onClose, pro
           throw results[0].error || results[1].error;
         }
 
-        setConversationId(newConversation.id);
+        console.log("Nouvelle conversation créée:", newConversation[0].id);
+        setConversationId(newConversation[0].id);
       }
     } catch (error) {
       if (error instanceof Error) {
@@ -207,6 +246,7 @@ export const MessageModal: React.FC<MessageModalProps> = ({ isOpen, onClose, pro
 
   const loadMessages = async (convId: string) => {
     try {
+      console.log("Chargement des messages pour la conversation:", convId);
       const { data, error } = await supabase
         .from('messages')
         .select('*')
@@ -215,6 +255,7 @@ export const MessageModal: React.FC<MessageModalProps> = ({ isOpen, onClose, pro
 
       if (error) throw error;
       
+      console.log(`${data?.length || 0} messages chargés`);
       setMessages(data || []);
       
       // Marquer tous les messages non lus comme lus
@@ -222,6 +263,8 @@ export const MessageModal: React.FC<MessageModalProps> = ({ isOpen, onClose, pro
         const unreadMessages = data.filter(
           msg => !msg.read && msg.sender_id !== currentUser.id
         );
+        
+        console.log(`${unreadMessages.length} messages non lus à marquer comme lus`);
         
         for (const msg of unreadMessages) {
           await markMessageAsRead(msg.id);
@@ -254,17 +297,19 @@ export const MessageModal: React.FC<MessageModalProps> = ({ isOpen, onClose, pro
 
     setLoading(true);
     try {
+      const messageContent = newMessage.trim();
+      setNewMessage(''); // Effacer le champ immédiatement pour une meilleure UX
+      
       const { error } = await supabase
         .from('messages')
         .insert({
           conversation_id: conversationId,
           sender_id: currentUser.id,
-          content: newMessage.trim(),
+          content: messageContent,
           read: false
         });
 
       if (error) throw error;
-      setNewMessage('');
     } catch (error) {
       console.error("Erreur envoi message:", error);
       if (error instanceof Error) {
