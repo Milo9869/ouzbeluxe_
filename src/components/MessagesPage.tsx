@@ -262,8 +262,8 @@ const MessagesPage: React.FC = () => {
                         <div
                           className={`max-w-[75%] rounded-lg p-3 ${
                             message.sender_id === currentUser?.id
-                              ? 'bg-black text-white'
-                              : 'bg-gray-100'
+                              ? 'bg-red-600 text-white'
+                              : 'bg-red-100'
                           }`}
                         >
                           <p className="whitespace-pre-wrap">{message.content}</p>

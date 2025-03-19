@@ -16,7 +16,7 @@ interface ProductForm {
   location: string;
   negotiable: boolean;
   images: File[];
-  status: 'draft' | 'published';
+  status: 'draft' | 'active';
 }
 
 const categories = {
@@ -89,71 +89,81 @@ const CreateProduct: React.FC = () => {
     setPreviewImages(prev => prev.filter((_, i) => i !== index));
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSubmitting(true);
+// Fonction modifiée handleSubmit dans CreateProduct.tsx
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  setIsSubmitting(true);
 
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        toast.error('Vous devez être connecté pour créer une annonce');
-        return;
-      }
-
-      // Upload des images
-      const imageUrls = await Promise.all(
-        form.images.map(async (file) => {
-          const fileExt = file.name.split('.').pop();
-          const fileName = `${user.id}/${Math.random()}.${fileExt}`;
-          const filePath = `products/${fileName}`;
-
-          const { error: uploadError } = await supabase.storage
-            .from('products')
-            .upload(filePath, file);
-
-          if (uploadError) throw uploadError;
-
-          const { data: { publicUrl } } = supabase.storage
-            .from('products')
-            .getPublicUrl(filePath);
-
-          return publicUrl;
-        })
-      );
-
-      // Créer l'annonce
-      const { error } = await supabase
-        .from('products')
-        .insert({
-          user_id: user.id,
-          category: form.category,
-          subcategory: form.subcategory,
-          brand: form.brand === 'Autre' ? form.customBrand : form.brand,
-          model: form.model,
-          condition: form.condition,
-          description: form.description,
-          price: form.price,
-          location: form.location,
-          negotiable: form.negotiable,
-          images: imageUrls,
-          status: form.status
-        });
-
-      if (error) throw error;
-
-      toast.success('Annonce créée avec succès');
-      // Rediriger vers la page d'accueil
-      navigate('/');
-    } catch (error) {
-      if (error instanceof Error) {
-        toast.error(`Erreur lors de la création de l'annonce: ${error.message}`);
-      } else {
-        toast.error('Erreur lors de la création de l\'annonce');
-      }
-    } finally {
-      setIsSubmitting(false);
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      toast.error('Vous devez être connecté pour créer une annonce');
+      return;
     }
-  };
+
+    // Upload des images
+    const imageUrls = await Promise.all(
+      form.images.map(async (file) => {
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${user.id}/${Math.random()}.${fileExt}`;
+        const filePath = `products/${fileName}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('products')
+          .upload(filePath, file);
+
+        if (uploadError) throw uploadError;
+
+        const { data: { publicUrl } } = supabase.storage
+          .from('products')
+          .getPublicUrl(filePath);
+
+        return publicUrl;
+      })
+    );
+
+    // MODIFICATION IMPORTANTE: Définir le statut comme 'active' au lieu de 'draft' ou autre
+    const status = form.status === 'draft' ? 'draft' : 'active';
+
+    // Créer l'annonce
+    const { error } = await supabase
+      .from('products')
+      .insert({
+        user_id: user.id,
+        category: form.category,
+        subcategory: form.subcategory,
+        brand: form.brand === 'Autre' ? form.customBrand : form.brand,
+        model: form.model,
+        condition: form.condition,
+        description: form.description,
+        price: form.price,
+        location: form.location,
+        negotiable: form.negotiable,
+        images: imageUrls,
+        status: status // Utiliser le statut défini ci-dessus
+      });
+
+    if (error) throw error;
+
+    // Message de succès plus explicite
+    const successMessage = status === 'active' 
+      ? 'Annonce publiée avec succès et visible dans les produits en vedette' 
+      : 'Annonce enregistrée comme brouillon';
+    
+    toast.success(successMessage);
+    
+    // Rediriger vers la page d'accueil
+    navigate('/');
+  } catch (error) {
+    if (error instanceof Error) {
+      toast.error(`Erreur lors de la création de l'annonce: ${error.message}`);
+    } else {
+      toast.error('Erreur lors de la création de l\'annonce');
+    }
+  } finally {
+    setIsSubmitting(false);
+  }
+};
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
@@ -394,13 +404,17 @@ const CreateProduct: React.FC = () => {
               <button
                 type="submit"
                 disabled={isSubmitting || form.images.length < 3}
+                onClick={() => setForm(prev => ({ ...prev, status: 'active' }))}
                 className="flex-1 bg-black text-white py-3 rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50"
               >
                 {isSubmitting ? 'Publication...' : 'Publier l\'annonce'}
               </button>
               <button
                 type="button"
-                onClick={() => setForm(prev => ({ ...prev, status: 'draft' }))}
+                onClick={() => {
+                  setForm(prev => ({ ...prev, status: 'draft' }));
+                  handleSubmit(new Event('submit') as unknown as React.FormEvent);
+                }}
                 className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-lg hover:bg-gray-200 transition-colors"
               >
                 Enregistrer comme brouillon
