@@ -122,3 +122,23 @@ CREATE TRIGGER update_conversation_timestamp
   AFTER INSERT ON messages
   FOR EACH ROW
   EXECUTE FUNCTION update_conversation_timestamp();
+
+  -- Ajout du statut de message pour les offres ou négociations
+ALTER TABLE messages ADD COLUMN message_type VARCHAR(50) DEFAULT 'text';
+ALTER TABLE messages ADD COLUMN offer_amount DECIMAL(10, 2);
+ALTER TABLE messages ADD COLUMN offer_status VARCHAR(50);
+
+-- Création d'une vue pour faciliter l'affichage des conversations avec produits
+CREATE OR REPLACE VIEW conversation_with_product AS
+SELECT 
+  c.id as conversation_id,
+  c.product_id,
+  p.title as product_title,
+  p.price as product_price,
+  p.image_url as product_image,
+  c.created_at,
+  c.updated_at
+FROM 
+  conversations c
+JOIN 
+  products p ON c.product_id = p.id;
