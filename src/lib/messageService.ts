@@ -108,7 +108,7 @@ async function findOrCreateConversationAlternative(productId: string, userId: st
     
     // Obtenir toutes les conversations de l'utilisateur
     const { data: userConversations, error: userConvsError } = await supabase
-      .from('conversation_participants')
+          .from('conversation_participants')
       .select('conversation_id')
       .eq('user_id', userId);
     
@@ -309,16 +309,16 @@ export async function getUserConversations(userId: string) {
         )
       `)
       .eq('user_id', userId);
-    
+
     if (userConvsError) throw userConvsError;
     
     if (!userConversations || userConversations.length === 0) {
       return { data: [], error: null };
     }
-    
+
     // 2. Construire les résumés de conversation
     const summaries = [];
-    
+      
     for (const conv of userConversations) {
       const conversation = conv.conversations as unknown as Conversation;
       
@@ -328,7 +328,7 @@ export async function getUserConversations(userId: string) {
         .select('user_id')
         .eq('conversation_id', conv.conversation_id)
         .neq('user_id', userId);
-      
+        
       if (partError) continue;
       
       if (!otherParticipants || otherParticipants.length === 0) continue;
@@ -341,7 +341,7 @@ export async function getUserConversations(userId: string) {
         .select('id, email, full_name, avatar_url')
         .eq('id', otherUserId)
         .single();
-      
+        
       if (userError) continue;
       
       // Obtenir le dernier message
@@ -351,7 +351,7 @@ export async function getUserConversations(userId: string) {
         .eq('conversation_id', conv.conversation_id)
         .order('created_at', { ascending: false })
         .limit(1);
-      
+        
       if (msgError) continue;
       
       // Compter les messages non lus
@@ -361,7 +361,7 @@ export async function getUserConversations(userId: string) {
         .eq('conversation_id', conv.conversation_id)
         .eq('read', false)
         .neq('sender_id', userId);
-      
+        
       if (countError) continue;
       
       // Construire le résumé
@@ -382,7 +382,7 @@ export async function getUserConversations(userId: string) {
         unread_count: count || 0
       });
     }
-    
+
     return { data: summaries, error: null };
   } catch (error) {
     console.error('Erreur dans getUserConversations:', error);

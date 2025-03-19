@@ -5,13 +5,9 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// Valeurs de secours pour le développement ou en cas d'erreur
-const fallbackUrl = 'https://wdzpgaxvffcgrjlzftcx.supabase.co';
-const fallbackKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndkenBnYXh2ZmZjZ3JqbHpmdGN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDE2MzM4NDksImV4cCI6MjA1NzIwOTg0OX0.ABdn_uAdwpxHbM3iV02Aizxr2BKmFqgvRPRQHUSzHzk';
-
-// Utiliser les variables d'environnement ou les valeurs de secours
-const url = supabaseUrl || fallbackUrl;
-const key = supabaseAnonKey || fallbackKey;
+// Utiliser les variables d'environnement ou les valeurs de xdajeclxygfgucbikqxr (projet avec migrations)
+const url = supabaseUrl || 'https://xdajeclxygfgucbikqxr.supabase.co';
+const key = supabaseAnonKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhkYWplY2x4eWdmZ3VjYmlrcXhyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDIzMTA2OTEsImV4cCI6MjA1Nzg4NjY5MX0.1lbGRv1eY5ELCvNzBSNNAEIfxmjG9-pazn8ukjwuSv4';
 
 // Créer le client Supabase
 export const supabase = createClient(url, key);

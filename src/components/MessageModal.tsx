@@ -102,13 +102,13 @@ export const MessageModal: React.FC<MessageModalProps> = ({ isOpen, onClose, pro
     
     // Créer un canal Supabase pour les messages en temps réel
     const channel = supabase
-      .channel(`messages:${conversationId}`)
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'messages',
-        filter: `conversation_id=eq.${conversationId}`,
-      }, (payload) => {
+        .channel(`messages:${conversationId}`)
+        .on('postgres_changes', {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
+          filter: `conversation_id=eq.${conversationId}`,
+        }, (payload) => {
         const newMessage = payload.new as Message;
         // Utiliser un callback fonctionnel pour s'assurer que nous avons l'état le plus récent
         setMessages(currentMessages => {
@@ -136,12 +136,12 @@ export const MessageModal: React.FC<MessageModalProps> = ({ isOpen, onClose, pro
     // Charger les messages existants
     loadMessages(conversationId);
 
-    return () => {
+      return () => {
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
         channelRef.current = null;
       }
-    };
+      };
   }, [conversationId, currentUser]);
 
   // Défiler jusqu'au dernier message
@@ -162,7 +162,7 @@ export const MessageModal: React.FC<MessageModalProps> = ({ isOpen, onClose, pro
 
       // Rechercher une conversation existante entre ces utilisateurs pour ce produit
       const { data: existingConversations, error: convError } = await supabase
-        .from('conversation_participants')
+    .from('conversation_participants')
         .select(`
           conversation_id,
           conversations!inner(
@@ -221,7 +221,7 @@ export const MessageModal: React.FC<MessageModalProps> = ({ isOpen, onClose, pro
             .from('conversation_participants')
             .insert({ conversation_id: newConversation[0].id, user_id: currentUser.id }),
           supabase
-            .from('conversation_participants')
+          .from('conversation_participants')
             .insert({ conversation_id: newConversation[0].id, user_id: sellerId })
         ];
 
@@ -299,7 +299,7 @@ export const MessageModal: React.FC<MessageModalProps> = ({ isOpen, onClose, pro
     try {
       const messageContent = newMessage.trim();
       setNewMessage(''); // Effacer le champ immédiatement pour une meilleure UX
-      
+
       const { error } = await supabase
         .from('messages')
         .insert({
@@ -348,18 +348,18 @@ export const MessageModal: React.FC<MessageModalProps> = ({ isOpen, onClose, pro
             </div>
           ) : (
             messages.map((message) => (
-              <div
-                key={message.id}
+            <div
+              key={message.id}
                 className={`flex ${message.sender_id === currentUser?.id ? 'justify-end' : 'justify-start'}`}
-              >
-                <div
-                  className={`max-w-[80%] rounded-lg p-3 ${
+            >
+              <div
+                className={`max-w-[80%] rounded-lg p-3 ${
                     message.sender_id === currentUser?.id
                       ? 'bg-black text-white'
                       : 'bg-gray-100'
-                  }`}
-                >
-                  <p>{message.content}</p>
+                }`}
+              >
+                <p>{message.content}</p>
                   <div className="flex items-center gap-1 mt-1">
                     <p className="text-xs opacity-70">
                       {new Date(message.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
