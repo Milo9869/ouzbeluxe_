@@ -22,6 +22,7 @@ interface ProductCardProps {
 const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+  const [imageError, setImageError] = useState(false);
 
   // Formatage du prix avec séparateur de milliers
   const formattedPrice = new Intl.NumberFormat('fr-FR', {
@@ -29,9 +30,6 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
     currency: 'EUR',
     maximumFractionDigits: 0
   }).format(product.price);
-
-  // Image par défaut en cas d'image manquante
-  const imageUrl = product.image || 'https://via.placeholder.com/300x200?text=Pas+d%27image';
 
   const handleMessageClick = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -60,19 +58,42 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
     setIsSearchModalOpen(true);
   };
 
+  // Rendu SVG d'image de remplacement
+  const renderPlaceholderImage = () => (
+    <div className="w-full h-64 bg-gray-100 flex flex-col items-center justify-center">
+      <svg 
+        xmlns="http://www.w3.org/2000/svg" 
+        width="48" 
+        height="48" 
+        viewBox="0 0 24 24" 
+        fill="none" 
+        stroke="#9ca3af"
+        strokeWidth="1.5" 
+        strokeLinecap="round" 
+        strokeLinejoin="round"
+      >
+        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+        <circle cx="8.5" cy="8.5" r="1.5" />
+        <polyline points="21 15 16 10 5 21" />
+      </svg>
+      <p className="mt-2 text-gray-500 text-sm">{product.title}</p>
+    </div>
+  );
+
   return (
     <>
       <div className="bg-white rounded-lg overflow-hidden shadow-lg hover:shadow-xl transition-shadow duration-300">
         <div className="relative">
-          <img 
-            src={imageUrl} 
-            alt={product.title}
-            className="w-full h-64 object-cover"
-            onError={(e) => {
-              // Fallback en cas d'erreur de chargement d'image
-              (e.target as HTMLImageElement).src = 'https://via.placeholder.com/300x200?text=Erreur+image';
-            }}
-          />
+          {imageError || !product.image ? (
+            renderPlaceholderImage()
+          ) : (
+            <img 
+              src={product.image} 
+              alt={product.title}
+              className="w-full h-64 object-cover"
+              onError={() => setImageError(true)}
+            />
+          )}
           <button className="absolute top-4 right-4 p-2 bg-white rounded-full shadow-md hover:bg-gray-100">
             <Heart className="h-5 w-5 text-gray-600" />
           </button>

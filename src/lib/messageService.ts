@@ -9,6 +9,9 @@ export interface Message {
   content: string;
   read: boolean;
   created_at: string;
+  message_type?: string;
+  offer_amount?: number;
+  offer_status?: string;
 }
 
 export interface Conversation {
@@ -90,68 +93,65 @@ export async function findOrCreateConversation(productId: string, userId: string
   console.log("findOrCreateConversation appelé avec:", { productId, userId, otherUserId });
   
   try {
-    // 1. Rechercher si une conversation existe déjà (manuellement)
-    console.log("Recherche manuelle de conversation existante");
-    
-    // 1.1 D'abord, récupérer toutes les conversations pour ce produit
-    const { data: productConversations, error: prodError } = await supabase
-      .from('conversations')
-      .select('id')
-      .eq('product_id', productId);
-    
-    if (prodError) {
-      console.error("Erreur recherche conversations par produit:", prodError);
-      throw prodError;
-    }
-    
-    console.log("Conversations pour ce produit:", productConversations);
-    
-    // Si aucune conversation pour ce produit, en créer une nouvelle directement
-    if (!productConversations || productConversations.length === 0) {
-      return await createNewConversation(productId, userId, otherUserId);
-    }
-    
-    // 1.2 Pour chaque conversation, vérifier si les deux utilisateurs sont participants
-    for (const conv of productConversations) {
-      // Vérifier les participants pour cette conversation
-      const { data: participants, error: partError } = await supabase
-        .from('conversation_participants')
-        .select('user_id')
-        .eq('conversation_id', conv.id);
-      
-      if (partError) {
-        console.error("Erreur recherche participants:", partError);
-        continue; // Essayer la conversation suivante
-      }
-      
-      // Extraire les IDs des participants
-      const participantIds = participants.map(p => p.user_id);
-      
-      // Vérifier si les deux utilisateurs sont dans cette conversation
-      if (participantIds.includes(userId) && participantIds.includes(otherUserId)) {
-        console.log("Conversation existante trouvée:", conv.id);
-        
-        // Récupérer les détails complets de la conversation
-        const { data: convDetails, error: detailsError } = await supabase
-          .from('conversations')
-          .select('*')
-          .eq('id', conv.id)
-          .single();
-        
-        if (detailsError) {
-          console.error("Erreur récupération détails conversation:", detailsError);
-          throw detailsError;
-        }
-        
-        return { data: convDetails, error: null };
-      }
-    }
-    
-    // 2. Si aucune conversation existante, en créer une nouvelle
-    return await createNewConversation(productId, userId, otherUserId);
-    
+    // Méthode alternative qui évite les politiques RLS récursives
+    return findOrCreateConversationAlternative(productId, userId, otherUserId);
   } catch (error) {
     console.error('Erreur complète findOrCreateConversation:', error);
+    return { data: null, error };
+  }
+}
+
+// Version alternative pour éviter les problèmes de récursion
+async function findOrCreateConversationAlternative(productId: string, userId: string, otherUserId: string) {
+  try {
+    console.log('Recherche de conversation pour', { productId, userId, otherUserId });
+    
+    // Obtenir toutes les conversations de l'utilisateur
+    const { data: userConversations, error: userConvsError } = await supabase
+      .from('conversation_participants')
+      .select('conversation_id')
+      .eq('user_id', userId);
+    
+    if (userConvsError) throw userConvsError;
+    
+    if (!userConversations || userConversations.length === 0) {
+      console.log('Aucune conversation trouvée pour cet utilisateur');
+      return createNewConversation(productId, userId, otherUserId);
+    }
+    
+    // Vérifier si l'autre utilisateur est dans une de ces conversations
+    const conversationIds = userConversations.map(uc => uc.conversation_id);
+    
+    const { data: otherUserConvs, error: otherUserError } = await supabase
+      .from('conversation_participants')
+      .select('conversation_id')
+      .eq('user_id', otherUserId)
+      .in('conversation_id', conversationIds);
+    
+    if (otherUserError) throw otherUserError;
+    
+    // Vérifier maintenant si une de ces conversations concerne le produit
+    if (otherUserConvs && otherUserConvs.length > 0) {
+      const sharedConvIds = otherUserConvs.map(c => c.conversation_id);
+      
+      const { data: prodConvs, error: prodConvsError } = await supabase
+        .from('conversations')
+        .select('id')
+        .eq('product_id', productId)
+        .in('id', sharedConvIds);
+      
+      if (prodConvsError) throw prodConvsError;
+      
+      if (prodConvs && prodConvs.length > 0) {
+        console.log('Conversation existante trouvée:', prodConvs[0].id);
+        return { data: { id: prodConvs[0].id }, error: null };
+      }
+    }
+    
+    // Si on arrive ici, aucune conversation existante n'a été trouvée
+    return createNewConversation(productId, userId, otherUserId);
+  } catch (error) {
+    console.error('Erreur dans findOrCreateConversationAlternative:', error);
     return { data: null, error };
   }
 }
@@ -293,16 +293,15 @@ export async function searchUsers(query: string, currentUserId: string) {
   }
 }
 
-// Récupérer toutes les conversations d'un utilisateur avec résumé
-export async function getUserConversations(userId: string): Promise<{ data: ConversationSummary[] | null, error: PostgrestError | null }> {
-  console.log("getUserConversations appelé pour userId:", userId);
+// Récupérer toutes les conversations d'un utilisateur avec résumé (version améliorée)
+export async function getUserConversations(userId: string) {
   try {
-    // 1. Récupérer toutes les conversations de l'utilisateur
-    const { data: userConversations, error: convError } = await supabase
+    // 1. Obtenir toutes les conversations auxquelles l'utilisateur participe
+    const { data: userConversations, error: userConvsError } = await supabase
       .from('conversation_participants')
       .select(`
         conversation_id,
-        conversations:conversations!inner(
+        conversations:conversation_id(
           id,
           product_id,
           created_at,
@@ -310,57 +309,42 @@ export async function getUserConversations(userId: string): Promise<{ data: Conv
         )
       `)
       .eq('user_id', userId);
-
-    console.log("Résultat étape 1 getUserConversations:", { userConversations, convError });
     
-    if (convError) throw convError;
+    if (userConvsError) throw userConvsError;
+    
     if (!userConversations || userConversations.length === 0) {
       return { data: [], error: null };
     }
-
-    // 2. Construire le tableau de résumés de conversations
-    const conversationSummaries: ConversationSummary[] = [];
-      
+    
+    // 2. Construire les résumés de conversation
+    const summaries = [];
+    
     for (const conv of userConversations) {
-      console.log("Traitement conversation:", conv.conversation_id);
+      const conversation = conv.conversations as unknown as Conversation;
       
-      // Trouver l'autre participant
-      const { data: participants, error: partError } = await supabase
+      // Obtenir les autres participants
+      const { data: otherParticipants, error: partError } = await supabase
         .from('conversation_participants')
         .select('user_id')
         .eq('conversation_id', conv.conversation_id)
         .neq('user_id', userId);
       
-      console.log("Participants:", { participants, partError });
-        
-      if (partError) {
-        console.error("Erreur participants:", partError);
-        continue;
-      }
+      if (partError) continue;
       
-      if (!participants || participants.length === 0) {
-        console.log("Aucun autre participant trouvé");
-        continue;
-      }
+      if (!otherParticipants || otherParticipants.length === 0) continue;
       
-      const otherUserId = participants[0].user_id;
-      console.log("Autre participant:", otherUserId);
+      const otherUserId = otherParticipants[0].user_id;
       
-      // Récupérer les informations de l'autre utilisateur
-      const { data: otherUserInfo, error: userError } = await supabase
+      // Obtenir les informations de l'utilisateur
+      const { data: userData, error: userError } = await supabase
         .from('profiles')
         .select('id, email, full_name, avatar_url')
         .eq('id', otherUserId)
         .single();
       
-      console.log("Infos autre utilisateur:", { otherUserInfo, userError });
-        
-      if (userError) {
-        console.error("Erreur infos utilisateur:", userError);
-        continue;
-      }
+      if (userError) continue;
       
-      // Récupérer le dernier message
+      // Obtenir le dernier message
       const { data: lastMessages, error: msgError } = await supabase
         .from('messages')
         .select('*')
@@ -368,12 +352,7 @@ export async function getUserConversations(userId: string): Promise<{ data: Conv
         .order('created_at', { ascending: false })
         .limit(1);
       
-      console.log("Dernier message:", { lastMessages, msgError });
-        
-      if (msgError) {
-        console.error("Erreur dernier message:", msgError);
-        continue;
-      }
+      if (msgError) continue;
       
       // Compter les messages non lus
       const { count, error: countError } = await supabase
@@ -383,23 +362,17 @@ export async function getUserConversations(userId: string): Promise<{ data: Conv
         .eq('read', false)
         .neq('sender_id', userId);
       
-      console.log("Messages non lus:", { count, countError });
-        
-      if (countError) {
-        console.error("Erreur comptage non lus:", countError);
-        continue;
-      }
+      if (countError) continue;
       
-      const conversation = conv.conversations as unknown as Conversation;
-      
-      conversationSummaries.push({
+      // Construire le résumé
+      summaries.push({
         id: conversation.id,
         product_id: conversation.product_id,
         other_user: {
-          id: otherUserInfo.id,
-          email: otherUserInfo.email,
-          full_name: otherUserInfo.full_name,
-          avatar_url: otherUserInfo.avatar_url
+          id: userData.id,
+          email: userData.email,
+          full_name: userData.full_name,
+          avatar_url: userData.avatar_url
         },
         last_message: lastMessages && lastMessages.length > 0 ? {
           content: lastMessages[0].content,
@@ -409,11 +382,10 @@ export async function getUserConversations(userId: string): Promise<{ data: Conv
         unread_count: count || 0
       });
     }
-
-    console.log("Résumés de conversations créés:", conversationSummaries.length);
-    return { data: conversationSummaries, error: null };
+    
+    return { data: summaries, error: null };
   } catch (error) {
-    console.error('Error getting user conversations:', error);
+    console.error('Erreur dans getUserConversations:', error);
     return { data: null, error: error instanceof Error ? { message: error.message, code: '', details: '', hint: '' } as PostgrestError : null };
   }
 }
@@ -454,57 +426,12 @@ export async function deleteConversation(conversationId: string) {
 // Vérifier si une conversation existe entre deux utilisateurs pour un produit
 export async function checkConversationExists(productId: string, userId: string, otherUserId: string) {
   try {
-    // 1. Rechercher les conversations pour ce produit
-    const { data: conversations, error: convError } = await supabase
-      .from('conversations')
-      .select(`
-        id,
-        conversation_participants!inner(user_id)
-      `)
-      .eq('product_id', productId);
-      
-    if (convError) throw convError;
-    
-    if (!conversations || conversations.length === 0) {
-      return { exists: false, conversationId: null, error: null };
-    }
-    
-    // 2. Pour chaque conversation, vérifier si les deux utilisateurs sont participants
-    for (const conv of conversations) {
-      // Vérifier si l'utilisateur actuel est participant
-      const { data: currentUserParticipant, error: currError } = await supabase
-        .from('conversation_participants')
-        .select('user_id')
-        .eq('conversation_id', conv.id)
-        .eq('user_id', userId)
-        .single();
-        
-      if (currError) continue;
-      
-      // Vérifier si l'autre utilisateur est participant
-      const { data: otherUserParticipant, error: otherError } = await supabase
-        .from('conversation_participants')
-        .select('user_id')
-        .eq('conversation_id', conv.id)
-        .eq('user_id', otherUserId)
-        .single();
-        
-      if (otherError) continue;
-      
-      // Si les deux sont participants, la conversation existe
-      if (currentUserParticipant && otherUserParticipant) {
-        return { exists: true, conversationId: conv.id, error: null };
-      }
-    }
-    
-    return { exists: false, conversationId: null, error: null };
+    return findOrCreateConversationAlternative(productId, userId, otherUserId);
   } catch (error) {
     console.error('Error checking conversation:', error);
     return { exists: false, conversationId: null, error };
   }
 }
-
-// src/lib/messageService.ts (extension)
 
 // Accepter une offre
 export async function acceptOffer(messageId: string) {

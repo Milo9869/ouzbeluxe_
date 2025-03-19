@@ -30,8 +30,8 @@ function App() {
       title: "Montre Vintage Cartier Tank",
       price: 12500,
       location: "Paris 8ème",
-      image: "https://images.unsplash.com/photo-1526045431048-f857369baa09?auto=format&fit=crop&q=80&w=600",
-      images: ["https://images.unsplash.com/photo-1526045431048-f857369baa09?auto=format&fit=crop&q=80&w=600"],
+      image: "/api/placeholder/600/400",
+      images: ["/api/placeholder/600/400"],
       description: "Authentique montre Cartier Tank en or, excellent état",
       seller_id: "seller1",
       user_id: "seller1"
@@ -41,8 +41,8 @@ function App() {
       title: "Sac Kelly Hermès",
       price: 18900,
       location: "Lyon",
-      image: "https://images.unsplash.com/photo-1548036328-c9fa89d128fa?auto=format&fit=crop&q=80&w=600",
-      images: ["https://images.unsplash.com/photo-1548036328-c9fa89d128fa?auto=format&fit=crop&q=80&w=600"],
+      image: "/api/placeholder/600/400",
+      images: ["/api/placeholder/600/400"],
       description: "Sac Kelly 28 en cuir Togo noir, état neuf",
       seller_id: "seller2",
       user_id: "seller2"
@@ -52,8 +52,8 @@ function App() {
       title: "Foulard en Soie Chanel",
       price: 450,
       location: "Bordeaux",
-      image: "https://images.unsplash.com/photo-1584030373081-f37b019b2445?auto=format&fit=crop&q=80&w=600",
-      images: ["https://images.unsplash.com/photo-1584030373081-f37b019b2445?auto=format&fit=crop&q=80&w=600"],
+      image: "/api/placeholder/600/400",
+      images: ["/api/placeholder/600/400"],
       description: "Foulard vintage en soie, motif camélia",
       seller_id: "seller3",
       user_id: "seller3"
@@ -69,6 +69,17 @@ function App() {
       setLoading(true);
       setError(null);
       
+      // Vérifier d'abord si la table produits existe
+      const { error: tableCheckError } = await supabase
+        .from('products')
+        .select('id')
+        .limit(1);
+      
+      if (tableCheckError) {
+        console.warn("Table check error:", tableCheckError);
+        throw new Error(tableCheckError.message);
+      }
+      
       // Tenter de charger les produits depuis Supabase
       const { data, error } = await supabase
         .from('products')
@@ -79,18 +90,7 @@ function App() {
       
       if (error) {
         console.error("Erreur Supabase:", error);
-        
-        // Utiliser les produits de secours
-        setProducts(fallbackProducts);
-        
-        // Si c'est une 404, afficher un message spécifique
-        if (error.code === "PGRST116") {
-          setError("La table 'products' n'existe pas encore ou n'est pas correctement configurée.");
-          toast.error("Base de données en cours d'initialisation. Données de démonstration affichées.");
-        } else {
-          setError(`Erreur lors du chargement des produits: ${error.message}`);
-          toast.error("Erreur de chargement. Données de démonstration affichées.");
-        }
+        throw new Error(error.message);
       } else if (data && data.length > 0) {
         console.log("Produits chargés:", data);
         
@@ -114,8 +114,18 @@ function App() {
     } catch (err) {
       console.error("Erreur lors du chargement des produits:", err);
       setProducts(fallbackProducts);
-      setError("Erreur lors du chargement des produits");
-      toast.error("Erreur inattendue. Données de démonstration affichées.");
+      
+      if (err instanceof Error) {
+        if (err.message.includes("does not exist")) {
+          setError("La table 'products' n'est pas encore disponible. Données de démonstration affichées.");
+        } else {
+          setError(`Erreur: ${err.message}`);
+        }
+      } else {
+        setError("Erreur lors du chargement des produits");
+      }
+      
+      toast.error("Erreur de chargement. Données de démonstration affichées.");
     } finally {
       setLoading(false);
     }
@@ -150,7 +160,7 @@ function App() {
                     // Assurer la compatibilité avec le composant ProductCard
                     image: product.image || (product.images && product.images.length > 0 
                       ? product.images[0] 
-                      : "https://via.placeholder.com/300x200?text=Pas+d'image")
+                      : "/api/placeholder/300/200")
                   }} />
                 ))}
               </div>
