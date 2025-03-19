@@ -40,6 +40,17 @@ const Navbar = () => {
     };
   }, []);
 
+  useEffect(() => {
+    // Animation pour le badge de messages non lus
+    const messageBadge = document.getElementById('message-badge');
+    if (messageBadge && unreadMessages > 0) {
+      messageBadge.classList.add('animate-ping');
+      setTimeout(() => {
+        messageBadge?.classList.remove('animate-ping');
+      }, 1000);
+    }
+  }, [unreadMessages]);
+
   // Abonnement aux nouveaux messages
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -137,7 +148,7 @@ const Navbar = () => {
                 >
                   <MessageCircle className="h-6 w-6" />
                   {unreadMessages > 0 && (
-                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-4 w-4 flex items-center justify-center">
+                    <span id="message-badge" className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-4 w-4 flex items-center justify-center">
                       {unreadMessages > 9 ? '9+' : unreadMessages}
                     </span>
                   )}
@@ -176,7 +187,7 @@ const Navbar = () => {
                 >
                   <MessageCircle className="h-6 w-6" />
                   {unreadMessages > 0 && (
-                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-4 w-4 flex items-center justify-center">
+                    <span id="message-badge" className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-4 w-4 flex items-center justify-center">
                       {unreadMessages > 9 ? '9+' : unreadMessages}
                     </span>
                   )}

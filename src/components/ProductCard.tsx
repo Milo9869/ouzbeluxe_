@@ -6,12 +6,12 @@ import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
 
 interface Product {
-  id: number;
+  id: string | number;
   title: string;
   price: number;
-  location: string;
-  image: string;
-  description: string;
+  location?: string;
+  image: string | null;
+  description?: string;
   seller_id: string;
 }
 
@@ -22,6 +22,16 @@ interface ProductCardProps {
 const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
+
+  // Formatage du prix avec séparateur de milliers
+  const formattedPrice = new Intl.NumberFormat('fr-FR', {
+    style: 'currency',
+    currency: 'EUR',
+    maximumFractionDigits: 0
+  }).format(product.price);
+
+  // Image par défaut en cas d'image manquante
+  const imageUrl = product.image || 'https://via.placeholder.com/300x200?text=Pas+d%27image';
 
   const handleMessageClick = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -55,9 +65,13 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
       <div className="bg-white rounded-lg overflow-hidden shadow-lg hover:shadow-xl transition-shadow duration-300">
         <div className="relative">
           <img 
-            src={product.image} 
+            src={imageUrl} 
             alt={product.title}
             className="w-full h-64 object-cover"
+            onError={(e) => {
+              // Fallback en cas d'erreur de chargement d'image
+              (e.target as HTMLImageElement).src = 'https://via.placeholder.com/300x200?text=Erreur+image';
+            }}
           />
           <button className="absolute top-4 right-4 p-2 bg-white rounded-full shadow-md hover:bg-gray-100">
             <Heart className="h-5 w-5 text-gray-600" />
@@ -66,10 +80,16 @@ const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
         
         <div className="p-6">
           <h3 className="text-xl font-semibold text-gray-900 mb-2">{product.title}</h3>
-          <p className="text-2xl font-bold text-gray-900 mb-2">{product.price.toLocaleString('fr-FR')} €</p>
-          <p className="text-gray-600 mb-4">{product.description}</p>
+          <p className="text-2xl font-bold text-gray-900 mb-2">{formattedPrice}</p>
+          
+          {product.description && (
+            <p className="text-gray-600 mb-4 line-clamp-2">{product.description}</p>
+          )}
+          
           <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-500">{product.location}</span>
+            {product.location && (
+              <span className="text-sm text-gray-500">{product.location}</span>
+            )}
             <div className="flex gap-2">
               <button
                 onClick={handleMessageClick}

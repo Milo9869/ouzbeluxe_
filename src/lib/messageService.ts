@@ -503,3 +503,71 @@ export async function checkConversationExists(productId: string, userId: string,
     return { exists: false, conversationId: null, error };
   }
 }
+
+// src/lib/messageService.ts (extension)
+
+// Accepter une offre
+export async function acceptOffer(messageId: string) {
+  try {
+    // 1. Mettre à jour le statut de l'offre
+    const { data: message, error: messageError } = await supabase
+      .from('messages')
+      .update({ offer_status: 'accepted' })
+      .eq('id', messageId)
+      .select()
+      .single();
+      
+    if (messageError) throw messageError;
+    
+    // 2. Envoyer un message de confirmation dans la conversation
+    const { error: notificationError } = await supabase
+      .from('messages')
+      .insert({
+        conversation_id: message.conversation_id,
+        sender_id: message.sender_id, // L'acheteur est informé que son offre est acceptée
+        content: `Offre de ${message.offer_amount}€ acceptée par le vendeur`,
+        message_type: 'system',
+        read: false
+      });
+      
+    if (notificationError) throw notificationError;
+    
+    return { data: message, error: null };
+  } catch (error) {
+    console.error('Error accepting offer:', error);
+    return { data: null, error };
+  }
+}
+
+// Décliner une offre
+export async function declineOffer(messageId: string) {
+  try {
+    // 1. Mettre à jour le statut de l'offre
+    const { data: message, error: messageError } = await supabase
+      .from('messages')
+      .update({ offer_status: 'declined' })
+      .eq('id', messageId)
+      .select()
+      .single();
+      
+    if (messageError) throw messageError;
+    
+    // 2. Envoyer un message de notification dans la conversation
+    const { error: notificationError } = await supabase
+      .from('messages')
+      .insert({
+        conversation_id: message.conversation_id,
+        sender_id: message.sender_id, // L'acheteur est informé que son offre est déclinée
+        content: `Offre de ${message.offer_amount}€ déclinée par le vendeur`,
+        message_type: 'system',
+        read: false
+      });
+      
+    if (notificationError) throw notificationError;
+    
+    return { data: message, error: null };
+  } catch (error) {
+    console.error('Error declining offer:', error);
+    return { data: null, error };
+  }
+}

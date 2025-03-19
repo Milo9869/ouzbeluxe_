@@ -87,7 +87,8 @@ async function createDirectConversation(productId: string, userId: string, other
 const SearchUser: React.FC<UserSearchProps> = ({ onClose, productId }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<UserSearchResult[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [searching, setSearching] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [useFallback, setUseFallback] = useState(false);
 
@@ -122,11 +123,15 @@ const SearchUser: React.FC<UserSearchProps> = ({ onClose, productId }) => {
       return;
     }
 
+    setSearching(true);
     const timer = setTimeout(() => {
       filterUsers(searchQuery);
     }, 300);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      setSearching(false);
+    };
   }, [searchQuery, useFallback]);
 
   const loadAllUsers = async () => {
@@ -264,6 +269,11 @@ const SearchUser: React.FC<UserSearchProps> = ({ onClose, productId }) => {
           autoFocus
         />
         <Search className="absolute left-3 top-2.5 h-5 w-5 text-gray-400" />
+        {searching && (
+          <div className="absolute right-10 top-2.5">
+            <div className="animate-spin h-5 w-5 border-2 border-gray-300 rounded-full border-t-black" />
+          </div>
+        )}
         {searchQuery && (
           <button
             onClick={() => setSearchQuery('')}
