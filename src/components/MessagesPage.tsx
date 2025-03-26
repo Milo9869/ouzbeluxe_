@@ -137,29 +137,57 @@ const MessagesPage: React.FC = () => {
     }
   };
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMessage.trim() || !selectedConversation || !currentUser) return;
-
-    try {
-      setLoading(true);
-      const messageContent = newMessage.trim();
-      setNewMessage(''); // Vider l'input immédiatement
-      
-      const { error } = await sendMessage(
-        selectedConversation.id,
-        currentUser.id,
-        messageContent
-      );
-      
-      if (error) throw error;
-    } catch (error) {
-      console.error('Error sending message:', error);
-      toast.error('Erreur lors de l\'envoi du message');
-    } finally {
-      setLoading(false);
+  // Fonction handleSendMessage corrigée pour MessagesPage.tsx
+const handleSendMessage = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!newMessage.trim() || !selectedConversation || !currentUser) {
+    // Ajouter une notification pour l'utilisateur sur les champs manquants
+    if (!newMessage.trim()) {
+      toast.error('Veuillez entrer un message');
+    } else if (!selectedConversation) {
+      toast.error('Veuillez sélectionner une conversation');
+    } else if (!currentUser) {
+      toast.error('Veuillez vous connecter pour envoyer un message');
     }
-  };
+    return;
+  }
+
+  // Stocker le message pour référence
+  const messageContent = newMessage.trim();
+  // Vider l'input immédiatement pour une meilleure UX
+  setNewMessage('');
+
+  try {
+    setLoading(true);
+    
+    console.log("Envoi du message:", {
+      conversationId: selectedConversation.id,
+      senderId: currentUser.id,
+      content: messageContent
+    });
+    
+    const { error } = await sendMessage(
+      selectedConversation.id,
+      currentUser.id,
+      messageContent
+    );
+    
+    if (error) {
+      console.error("Erreur lors de l'envoi:", error);
+      throw error;
+    }
+    
+    // Pas besoin d'ajouter manuellement le message au state
+    // car le canal Supabase en temps réel s'en chargera
+  } catch (error) {
+    console.error('Error sending message:', error);
+    // Restaurer le message dans l'input en cas d'erreur pour ne pas le perdre
+    setNewMessage(messageContent);
+    toast.error('Erreur lors de l\'envoi du message');
+  } finally {
+    setLoading(false);
+  }
+};
 
   const formatTime = (dateString: string) => {
     const date = new Date(dateString);

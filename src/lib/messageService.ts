@@ -42,16 +42,22 @@ export interface ConversationSummary {
   unread_count: number;
 }
 
+// Constante pour les conversations générales
+const GENERAL_UUID = "00000000-0000-0000-0000-000000000001";
+
 // Créer une nouvelle conversation
 export async function createConversation(productId: string, participants: string[]) {
   console.log("createConversation appelé avec:", { productId, participants });
   
   try {
+    // Valider le productId
+    const validProductId = productId === 'general' ? GENERAL_UUID : productId;
+    
     // 1. Créer la conversation
     console.log("Création de la conversation...");
     const { data: conversation, error: convError } = await supabase
       .from('conversations')
-      .insert({ product_id: productId })
+      .insert({ product_id: validProductId })
       .select()
       .single();
 
@@ -104,11 +110,13 @@ export async function findOrCreateConversation(productId: string, userId: string
 // Version alternative pour éviter les problèmes de récursion
 async function findOrCreateConversationAlternative(productId: string, userId: string, otherUserId: string) {
   try {
-    console.log('Recherche de conversation pour', { productId, userId, otherUserId });
+    // Valider le productId
+    const validProductId = productId === 'general' ? GENERAL_UUID : productId;
+    console.log('Recherche de conversation pour', { productId: validProductId, userId, otherUserId });
     
     // Obtenir toutes les conversations de l'utilisateur
     const { data: userConversations, error: userConvsError } = await supabase
-          .from('conversation_participants')
+      .from('conversation_participants')
       .select('conversation_id')
       .eq('user_id', userId);
     
@@ -116,7 +124,7 @@ async function findOrCreateConversationAlternative(productId: string, userId: st
     
     if (!userConversations || userConversations.length === 0) {
       console.log('Aucune conversation trouvée pour cet utilisateur');
-      return createNewConversation(productId, userId, otherUserId);
+      return createNewConversation(validProductId, userId, otherUserId);
     }
     
     // Vérifier si l'autre utilisateur est dans une de ces conversations
@@ -137,7 +145,7 @@ async function findOrCreateConversationAlternative(productId: string, userId: st
       const { data: prodConvs, error: prodConvsError } = await supabase
         .from('conversations')
         .select('id')
-        .eq('product_id', productId)
+        .eq('product_id', validProductId)
         .in('id', sharedConvIds);
       
       if (prodConvsError) throw prodConvsError;
@@ -149,7 +157,7 @@ async function findOrCreateConversationAlternative(productId: string, userId: st
     }
     
     // Si on arrive ici, aucune conversation existante n'a été trouvée
-    return createNewConversation(productId, userId, otherUserId);
+    return createNewConversation(validProductId, userId, otherUserId);
   } catch (error) {
     console.error('Erreur dans findOrCreateConversationAlternative:', error);
     return { data: null, error };
@@ -158,7 +166,7 @@ async function findOrCreateConversationAlternative(productId: string, userId: st
 
 // Fonction auxiliaire pour créer une nouvelle conversation
 async function createNewConversation(productId: string, userId: string, otherUserId: string) {
-  console.log("Création d'une nouvelle conversation");
+  console.log("Création d'une nouvelle conversation avec productId:", productId);
   
   try {
     // 1. Créer la conversation
@@ -203,14 +211,39 @@ async function createNewConversation(productId: string, userId: string, otherUse
 }
 
 // Envoyer un message
+// src/lib/messageService.ts - Fonction sendMessage corrigée
 export async function sendMessage(conversationId: string, senderId: string, content: string) {
   console.log("sendMessage appelé:", { conversationId, senderId, content });
   try {
+    // 1. D'abord, nous devons trouver le destinataire (l'autre participant de la conversation)
+    const { data: participants, error: partError } = await supabase
+      .from('conversation_participants')
+      .select('user_id')
+      .eq('conversation_id', conversationId)
+      .neq('user_id', senderId);
+
+    if (partError) {
+      console.error("Erreur recherche participants:", partError);
+      throw partError;
+    }
+
+    // Vérifier si nous avons trouvé au moins un autre participant
+    if (!participants || participants.length === 0) {
+      console.error("Aucun destinataire trouvé pour cette conversation");
+      throw new Error("Aucun destinataire trouvé pour cette conversation");
+    }
+
+    // Récupérer l'ID du destinataire (premier autre participant)
+    const recipientId = participants[0].user_id;
+    console.log("Destinataire identifié:", recipientId);
+
+    // 2. Maintenant, insérer le message avec le recipient_id
     const { data, error } = await supabase
       .from('messages')
       .insert({
         conversation_id: conversationId,
         sender_id: senderId,
+        recipient_id: recipientId, // Ajout du recipient_id requis
         content: content.trim(),
         read: false
       })
@@ -279,10 +312,22 @@ export async function markAllMessagesAsRead(conversationId: string, userId: stri
 // Rechercher des utilisateurs
 export async function searchUsers(query: string, currentUserId: string) {
   try {
+    // Utiliser la fonction search_users définie dans la base de données si elle existe
+    const { data: functionData, error: functionError } = await supabase.rpc('search_users', {
+      search_query: query,
+      current_user_id: currentUserId
+    });
+    
+    if (!functionError && functionData) {
+      return { data: functionData, error: null };
+    }
+    
+    // Si la fonction RPC échoue, fallback sur la requête directe
+    // NOTE: Modifier pour ne pas demander email directement depuis profiles
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, email, full_name, avatar_url')
-      .or(`email.ilike.%${query}%,full_name.ilike.%${query}%`)
+      .select('id, username, full_name, avatar_url')
+      .or(`username.ilike.%${query}%,full_name.ilike.%${query}%`)
       .neq('id', currentUserId)
       .limit(20);
 
@@ -293,9 +338,21 @@ export async function searchUsers(query: string, currentUserId: string) {
   }
 }
 
-// Récupérer toutes les conversations d'un utilisateur avec résumé (version améliorée)
+// Récupérer toutes les conversations d'un utilisateur avec résumé
 export async function getUserConversations(userId: string) {
   try {
+    // Essayer d'utiliser la fonction RPC si elle existe
+    const { data: functionData, error: functionError } = await supabase.rpc('get_user_conversations', {
+      user_id: userId
+    });
+    
+    if (!functionError && functionData) {
+      console.log("Conversations récupérées via RPC:", functionData);
+      return { data: functionData, error: null };
+    }
+    
+    console.log("Fallback sur la méthode manuelle pour récupérer les conversations");
+    
     // 1. Obtenir toutes les conversations auxquelles l'utilisateur participe
     const { data: userConversations, error: userConvsError } = await supabase
       .from('conversation_participants')
@@ -335,52 +392,106 @@ export async function getUserConversations(userId: string) {
       
       const otherUserId = otherParticipants[0].user_id;
       
-      // Obtenir les informations de l'utilisateur
-      const { data: userData, error: userError } = await supabase
-        .from('profiles')
-        .select('id, email, full_name, avatar_url')
-        .eq('id', otherUserId)
-        .single();
+      // Obtenir les informations de l'utilisateur - CORRIGÉ: Jointure entre auth.users et profiles
+      // Cette requête ne fonctionne que si on a les droits sur auth.users
+      try {
+        // D'abord essayer d'obtenir juste les informations du profil sans email
+        const { data: profileData, error: profileError } = await supabase
+          .from('profiles')
+          .select('id, username, full_name, avatar_url')
+          .eq('id', otherUserId)
+          .single();
+          
+        if (profileError) throw profileError;
         
-      if (userError) continue;
-      
-      // Obtenir le dernier message
-      const { data: lastMessages, error: msgError } = await supabase
-        .from('messages')
-        .select('*')
-        .eq('conversation_id', conv.conversation_id)
-        .order('created_at', { ascending: false })
-        .limit(1);
+        // Maintenant essayer d'obtenir l'email séparément
+        const { data: authData, error: authError } = await supabase.auth.admin.getUserById(otherUserId);
         
-      if (msgError) continue;
-      
-      // Compter les messages non lus
-      const { count, error: countError } = await supabase
-        .from('messages')
-        .select('*', { count: 'exact', head: true })
-        .eq('conversation_id', conv.conversation_id)
-        .eq('read', false)
-        .neq('sender_id', userId);
+        const userData = {
+          id: profileData.id,
+          username: profileData.username,
+          full_name: profileData.full_name,
+          avatar_url: profileData.avatar_url,
+          // Ajouter l'email si on a pu le récupérer
+          email: authError ? null : authData?.user?.email
+        };
         
-      if (countError) continue;
-      
-      // Construire le résumé
-      summaries.push({
-        id: conversation.id,
-        product_id: conversation.product_id,
-        other_user: {
-          id: userData.id,
-          email: userData.email,
-          full_name: userData.full_name,
-          avatar_url: userData.avatar_url
-        },
-        last_message: lastMessages && lastMessages.length > 0 ? {
-          content: lastMessages[0].content,
-          created_at: lastMessages[0].created_at,
-          sender_id: lastMessages[0].sender_id
-        } : undefined,
-        unread_count: count || 0
-      });
+        // Obtenir le dernier message
+        const { data: lastMessages, error: msgError } = await supabase
+          .from('messages')
+          .select('*')
+          .eq('conversation_id', conv.conversation_id)
+          .order('created_at', { ascending: false })
+          .limit(1);
+          
+        if (msgError) continue;
+        
+        // Compter les messages non lus
+        const { count, error: countError } = await supabase
+          .from('messages')
+          .select('*', { count: 'exact', head: true })
+          .eq('conversation_id', conv.conversation_id)
+          .eq('read', false)
+          .neq('sender_id', userId);
+          
+        if (countError) continue;
+        
+        // Construire le résumé
+        summaries.push({
+          id: conversation.id,
+          product_id: conversation.product_id,
+          other_user: {
+            id: userData.id,
+            // L'email peut être null ou undefined
+            email: userData.email || userData.username,
+            full_name: userData.full_name,
+            avatar_url: userData.avatar_url
+          },
+          last_message: lastMessages && lastMessages.length > 0 ? {
+            content: lastMessages[0].content,
+            created_at: lastMessages[0].created_at,
+            sender_id: lastMessages[0].sender_id
+          } : undefined,
+          unread_count: count || 0
+        });
+      } catch (userError) {
+        console.error('Erreur récupération données utilisateur:', userError);
+        
+        // Si on ne peut pas obtenir le profil, essayer une approche plus simple
+        const simplifiedUserData = {
+          id: otherUserId,
+          full_name: "Utilisateur " + otherUserId.substring(0, 8),
+          avatar_url: null
+        };
+        
+        // Obtenir le dernier message et les non lus quand même
+        const { data: lastMessages } = await supabase
+          .from('messages')
+          .select('*')
+          .eq('conversation_id', conv.conversation_id)
+          .order('created_at', { ascending: false })
+          .limit(1);
+        
+        const { count } = await supabase
+          .from('messages')
+          .select('*', { count: 'exact', head: true })
+          .eq('conversation_id', conv.conversation_id)
+          .eq('read', false)
+          .neq('sender_id', userId);
+        
+        // Ajouter quand même la conversation au résumé avec les données simplifiées
+        summaries.push({
+          id: conversation.id,
+          product_id: conversation.product_id,
+          other_user: simplifiedUserData,
+          last_message: lastMessages && lastMessages.length > 0 ? {
+            content: lastMessages[0].content,
+            created_at: lastMessages[0].created_at,
+            sender_id: lastMessages[0].sender_id
+          } : undefined,
+          unread_count: count || 0
+        });
+      }
     }
 
     return { data: summaries, error: null };

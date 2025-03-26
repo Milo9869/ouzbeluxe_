@@ -1,11 +1,9 @@
-// src/components/SearchUser.tsx - Solution hybride
+// src/components/SearchUser.tsx - Version corrigée
 import React, { useState, useEffect } from 'react';
 import { Search, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import toast from 'react-hot-toast';
-
-// UUID constant pour conversations générales
-const GENERAL_UUID = "00000000-0000-0000-0000-000000000001";
+import { findOrCreateConversation } from '../lib/messageService';
 
 interface UserSearchProps {
   onClose?: () => void;
@@ -17,6 +15,7 @@ interface UserSearchResult {
   username?: string | null;
   full_name?: string | null;
   avatar_url?: string | null;
+  email?: string | null;
 }
 
 // Utilisateurs de secours
@@ -25,65 +24,6 @@ const FALLBACK_USERS = [
   { id: '22222222-2222-2222-2222-222222222222', username: 'demo2@example.com', full_name: 'Utilisateur Demo 2' }
 ];
 
-// Fonction pour créer directement une conversation
-async function createDirectConversation(productId: string, userId: string, otherUserId: string) {
-  try {
-    // Utiliser un UUID fixe pour "general"
-    const validProductId = productId === 'general' ? GENERAL_UUID : productId;
-    
-    console.log("Création de conversation avec product_id:", validProductId);
-    
-    // 1. Créer une nouvelle conversation
-    const { data: conversation, error: convError } = await supabase
-      .from('conversations')
-      .insert({ 
-        product_id: validProductId
-      })
-      .select()
-      .single();
-    
-    if (convError) {
-      console.error("Erreur création conversation:", convError);
-      throw convError;
-    }
-    
-    console.log("Conversation créée:", conversation);
-    
-    // 2. Ajouter le premier utilisateur
-    const { error: user1Error } = await supabase
-      .from('conversation_participants')
-      .insert({ 
-        conversation_id: conversation.id, 
-        user_id: userId 
-      });
-    
-    if (user1Error) {
-      console.error("Erreur ajout premier participant:", user1Error);
-      throw user1Error;
-    }
-    
-    // 3. Ajouter le deuxième utilisateur
-    const { error: user2Error } = await supabase
-      .from('conversation_participants')
-      .insert({ 
-        conversation_id: conversation.id, 
-        user_id: otherUserId 
-      });
-    
-    if (user2Error) {
-      console.error("Erreur ajout second participant:", user2Error);
-      throw user2Error;
-    }
-    
-    console.log("Participants ajoutés avec succès");
-    
-    return { conversation, error: null };
-  } catch (error) {
-    console.error('Erreur complète création conversation:', error);
-    return { conversation: null, error };
-  }
-}
-
 const SearchUser: React.FC<UserSearchProps> = ({ onClose, productId }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<UserSearchResult[]>([]);
@@ -91,14 +31,27 @@ const SearchUser: React.FC<UserSearchProps> = ({ onClose, productId }) => {
   const [searching, setSearching] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [useFallback, setUseFallback] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const init = async () => {
       try {
+        setLoading(true);
+        setError(null);
+        
         // Récupérer l'utilisateur actuel
-        const { data: { user } } = await supabase.auth.getUser();
+        const { data: { user }, error: userError } = await supabase.auth.getUser();
+        if (userError) {
+          console.error("Erreur auth:", userError);
+          throw new Error("Erreur d'authentification");
+        }
+        
         if (user) {
           setCurrentUserId(user.id);
+          console.log("Utilisateur actuel:", user.id);
+        } else {
+          console.log("Aucun utilisateur connecté");
+          throw new Error("Veuillez vous connecter pour rechercher des utilisateurs");
         }
         
         // Essayer de charger tous les utilisateurs
@@ -106,6 +59,7 @@ const SearchUser: React.FC<UserSearchProps> = ({ onClose, productId }) => {
         
       } catch (error) {
         console.error("Erreur d'initialisation:", error);
+        setError(error instanceof Error ? error.message : "Erreur lors du chargement des utilisateurs");
         setUseFallback(true);
         setSearchResults(FALLBACK_USERS);
       } finally {
@@ -137,15 +91,22 @@ const SearchUser: React.FC<UserSearchProps> = ({ onClose, productId }) => {
   const loadAllUsers = async () => {
     try {
       setLoading(true);
+      setError(null);
+      
+      // Utiliser seulement les champs qui existent dans la table profiles
       const { data, error } = await supabase
         .from('profiles')
         .select('id, username, full_name, avatar_url')
         .limit(20);
       
-      if (error) throw error;
+      if (error) {
+        console.error("Erreur supabase:", error);
+        throw error;
+      }
       
       if (!data || data.length === 0) {
         // Aucun utilisateur trouvé, utiliser les utilisateurs de secours
+        console.log("Aucun utilisateur trouvé, utilisation des données de secours");
         setUseFallback(true);
         setSearchResults(FALLBACK_USERS);
         return;
@@ -153,11 +114,13 @@ const SearchUser: React.FC<UserSearchProps> = ({ onClose, productId }) => {
       
       // Filtrer l'utilisateur actuel
       const filteredData = data.filter(user => user.id !== currentUserId);
+      console.log(`${filteredData.length} utilisateurs chargés`);
       setSearchResults(filteredData);
       setUseFallback(false);
       
     } catch (error) {
       console.error("Erreur chargement utilisateurs:", error);
+      setError("Erreur lors du chargement des utilisateurs");
       setUseFallback(true);
       setSearchResults(FALLBACK_USERS);
     } finally {
@@ -199,9 +162,11 @@ const SearchUser: React.FC<UserSearchProps> = ({ onClose, productId }) => {
 
     try {
       setLoading(true);
+      setError(null);
       
       if (useFallback) {
         // En mode fallback, simuler la création d'une conversation
+        console.log("Mode fallback: simulation de création de conversation");
         setTimeout(() => {
           if (!productId) {
             // Navigation force direct
@@ -214,17 +179,21 @@ const SearchUser: React.FC<UserSearchProps> = ({ onClose, productId }) => {
         return;
       }
       
-      // Utiliser la méthode directe au lieu de findOrCreateConversation
-      const { conversation, error } = await createDirectConversation(
+      console.log("Utilisation de findOrCreateConversation");
+      // Utiliser la méthode améliorée
+      const { data, error } = await findOrCreateConversation(
         productId || 'general',
         currentUserId,
         user.id
       );
 
-      if (error || !conversation) {
+      if (error || !data) {
+        console.error("Erreur création conversation:", error);
+        setError("Échec de création de la conversation");
         throw error || new Error("Échec de création de la conversation");
       }
       
+      console.log("Conversation créée avec succès:", data);
       toast.success(`Conversation initiée avec ${user.full_name || user.username}`);
       
       console.log("Navigation: productId =", productId);
@@ -240,6 +209,9 @@ const SearchUser: React.FC<UserSearchProps> = ({ onClose, productId }) => {
     } catch (error) {
       console.error('Erreur conversation:', error);
       toast.error('Erreur lors de la création de la conversation');
+      if (!error) {
+        setError('Erreur lors de la création de la conversation');
+      }
     } finally {
       setLoading(false);
     }
@@ -264,7 +236,7 @@ const SearchUser: React.FC<UserSearchProps> = ({ onClose, productId }) => {
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Rechercher par nom ou email..."
+          placeholder="Rechercher par nom ou username..."
           className="w-full px-10 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent"
           autoFocus
         />
@@ -283,6 +255,12 @@ const SearchUser: React.FC<UserSearchProps> = ({ onClose, productId }) => {
           </button>
         )}
       </div>
+
+      {error && (
+        <div className="p-4 mb-4 text-sm text-red-500 bg-red-50 rounded-lg">
+          {error}
+        </div>
+      )}
 
       {loading ? (
         <div className="text-center py-4">Chargement...</div>
@@ -303,6 +281,10 @@ const SearchUser: React.FC<UserSearchProps> = ({ onClose, productId }) => {
                   src={user.avatar_url}
                   alt="Avatar"
                   className="h-10 w-10 rounded-full mr-3"
+                  onError={(e) => {
+                    // En cas d'erreur, utiliser l'avatar par défaut
+                    (e.target as HTMLImageElement).src = 'https://via.placeholder.com/40';
+                  }}
                 />
               ) : (
                 <div className="h-10 w-10 rounded-full bg-gray-200 mr-3 flex items-center justify-center text-gray-600">
